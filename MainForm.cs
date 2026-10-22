@@ -143,7 +143,7 @@ public sealed class MainForm : Form
         if(dlg.ShowDialog(this)!=DialogResult.OK)return;
         var format=dlg.FilterIndex==2?ImageFormat.Bmp:ImageFormat.Png;
         preview.MakeCurrent();
-        GL.ReadBuffer(OpenTK.Graphics.OpenGL4.ReadBufferMode.Front);
+        OpenTK.Graphics.OpenGL4.GL.ReadBuffer(OpenTK.Graphics.OpenGL4.ReadBufferMode.Front);
         int w=preview.ClientSize.Width,h=preview.ClientSize.Height;
         if(w<1||h<1)return;
         byte[] pixels = new byte[w*h*4];

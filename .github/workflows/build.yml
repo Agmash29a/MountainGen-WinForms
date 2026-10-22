@@ -1,0 +1,20 @@
+name: Build Windows Forms
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+      - name: Restore
+        run: dotnet restore MountainGen.WinForms.csproj
+      - name: Build
+        run: dotnet build MountainGen.WinForms.csproj --configuration Release --no-restore

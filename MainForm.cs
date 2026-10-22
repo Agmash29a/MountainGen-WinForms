@@ -1,3 +1,4 @@
+using OpenTK.GLControl;
 using System.Numerics;
 using System.Drawing.Imaging;
 
@@ -7,7 +8,9 @@ public sealed class MainForm : Form
 {
     private readonly RenderSettings settings = new();
     private Terrain terrain = null!;
-    private readonly PictureBox preview = new() { Dock = DockStyle.Fill, SizeMode = PictureBoxSizeMode.Normal, BackColor = Color.Black };
+    private readonly GLControl preview = new(new GLControlSettings { APIVersion = new Version(3,3,0,0), NumberOfSamples = 4 }) { Dock=DockStyle.Fill, BackColor=Color.Black };
+    private readonly GpuTerrainRenderer gpu = new();
+    private bool gpuReady;
     private readonly FlowLayoutPanel controls = new() { Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoScroll = true, Padding = new Padding(14), BackColor = Color.FromArgb(34,43,58) };
     private readonly Label status = new() { Dock=DockStyle.Bottom, Height=28, TextAlign=ContentAlignment.MiddleLeft, Padding=new Padding(12,0,0,0) };
     private readonly NumericUpDown detail = Number(6,2,9);
@@ -21,11 +24,11 @@ public sealed class MainForm : Form
     private readonly CheckBox wireframe = new() { Text="Wireframe", AutoSize=true };
     private readonly CheckBox water = new() { Text="Show water", Checked=true, AutoSize=true };
     private readonly CheckBox axes = new() { Text="Show axes", AutoSize=true };
-    private readonly System.Windows.Forms.Timer redrawTimer = new() { Interval=100 };
+    private readonly System.Windows.Forms.Timer redrawTimer = new() { Interval=16 };
 
     public MainForm()
     {
-        Text = "MountainGen — C# Windows Forms";
+        Text = "MountainGen — OpenTK GPU Renderer";
         MinimumSize = new Size(850,580);
         ClientSize = new Size(1280,820);
         Font = new Font("Segoe UI", 9);
@@ -61,6 +64,11 @@ public sealed class MainForm : Form
         foreach (var numeric in new[] { azimuth,elevation,zoom,heightScale,seaLevel }) numeric.ValueChanged += (_,_)=>QueueRender();
         foreach (var check in new[] { wireframe,water,axes }) check.CheckedChanged+=(_,_)=>QueueRender();
         redrawTimer.Tick += (_,_)=> {redrawTimer.Stop(); Render();};
+        preview.Load += (_,_) => {
+            try { preview.MakeCurrent(); gpu.Initialise(); gpuReady=true; if(terrain is not null) gpu.Upload(terrain); QueueRender(); }
+            catch(Exception ex) { MessageBox.Show(this,ex.ToString(),"OpenGL initialization failed"); }
+        };
+        preview.Paint += (_,_)=> Render();
         preview.Resize += (_,_)=>QueueRender();
         Point? lastMouse=null;
         preview.MouseDown += (_,e)=> {if(e.Button==MouseButtons.Left) lastMouse=e.Location;};
@@ -97,6 +105,7 @@ public sealed class MainForm : Form
         {
             UseWaitCursor=true;
             terrain=Terrain.Generate((int)detail.Value,(int)seed.Value,(float)roughness.Value);
+            if(gpuReady) { preview.MakeCurrent(); gpu.Upload(terrain); }
             Render();
         }
         catch(Exception ex) { MessageBox.Show(this,ex.Message,"Generation error"); }
@@ -120,10 +129,8 @@ public sealed class MainForm : Form
         try
         {
             UpdateSettings();
-            var bmp=TerrainRenderer.Render(terrain,settings,preview.Width,preview.Height);
-            var old=preview.Image;
-            preview.Image=bmp;
-            old?.Dispose();
+            if(!gpuReady) return;
+            gpu.Render(preview,settings);
             int cells=terrain.Size-1;
             status.Text=$"Grid: {terrain.Size}×{terrain.Size}  |  Triangles: {2*cells*cells:N0}  |  Seed: {seed.Value}";
         }
@@ -131,11 +138,28 @@ public sealed class MainForm : Form
     }
     private void SaveImage()
     {
-        if(preview.Image is null)return;
+        if(!gpuReady)return;
         using var dlg=new SaveFileDialog { Filter="PNG image|*.png|Bitmap image|*.bmp",FileName="mountain.png" };
         if(dlg.ShowDialog(this)!=DialogResult.OK)return;
         var format=dlg.FilterIndex==2?ImageFormat.Bmp:ImageFormat.Png;
-        preview.Image.Save(dlg.FileName,format);
+        preview.MakeCurrent();
+        GL.ReadBuffer(OpenTK.Graphics.OpenGL4.ReadBufferMode.Front);
+        int w=preview.ClientSize.Width,h=preview.ClientSize.Height;
+        if(w<1||h<1)return;
+        byte[] pixels = new byte[w*h*4];
+        OpenTK.Graphics.OpenGL4.GL.PixelStore(OpenTK.Graphics.OpenGL4.PixelStoreParameter.PackAlignment,1);
+        OpenTK.Graphics.OpenGL4.GL.ReadPixels(0,0,w,h,OpenTK.Graphics.OpenGL4.PixelFormat.Bgra,
+            OpenTK.Graphics.OpenGL4.PixelType.UnsignedByte,pixels);
+        using var bmp = new Bitmap(w,h,System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+        var rect = new Rectangle(0,0,w,h);
+        var data = bmp.LockBits(rect,ImageLockMode.WriteOnly,System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+        try
+        {
+            for(int y=0;y<h;y++)
+                System.Runtime.InteropServices.Marshal.Copy(pixels,(h-y-1)*w*4,IntPtr.Add(data.Scan0,y*data.Stride),w*4);
+        }
+        finally {bmp.UnlockBits(data);}
+        bmp.Save(dlg.FileName,format);
     }
     private void ExportObj()
     {
@@ -161,7 +185,7 @@ public sealed class MainForm : Form
     protected override void OnFormClosed(FormClosedEventArgs e)
     {
         redrawTimer.Dispose();
-        preview.Image?.Dispose();
+        if(gpuReady) {preview.MakeCurrent(); gpu.Dispose();}
         base.OnFormClosed(e);
     }
 }

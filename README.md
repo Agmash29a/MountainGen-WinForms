@@ -1,29 +1,34 @@
-# MountainGen — C# Windows Forms
+# MountainGen — OpenTK GPU rendering branch
 
-A modern Windows Forms reinterpretation of Riley T. Perry's 2002 VB6 MountainGen:
-https://github.com/Agmash29a/MountainGen
+This branch upgrades the original [MountainGen WinForms](https://github.com/Agmash29a/MountainGen-WinForms) port to **GPU rendering**, without replacing its Windows Forms controls.
 
-## Requirements
-- Windows 10/11
-- Visual Studio 2022 with **.NET desktop development**, or the .NET 8 SDK.
-
-## Run
-Open `MountainGen.WinForms.csproj` in Visual Studio and press F5.
-Or, on Windows:
+## Setup
+- Windows 10/11 and an OpenGL 3.3-capable graphics driver
+- .NET 8 SDK or Visual Studio 2022 with the .NET desktop development workload
+- NuGet restore downloads `OpenTK.GLControl 4.0.2` and its OpenTK dependencies
 
 ```powershell
+git switch feature/opentk-gpu-rendering
+dotnet restore
 dotnet run --project MountainGen.WinForms.csproj
 ```
 
-## Features
-- Recursive midpoint-displacement (diamond-square) terrain, repeatable with a seed
-- Adjustable subdivision detail, roughness, and vertical exaggeration
-- Software 3D triangular mesh renderer with flat Lambert lighting
-- Vegetation, rock, snow and water altitude colouring
-- Camera orbit by dragging, zoom by mouse wheel, wireframe mode, XYZ axes
-- PNG/BMP screenshots and Wavefront OBJ mesh export
+## Implementation
+- `GLControl` embedded in the right pane of the existing Windows Forms UI
+- OpenGL 3.3 vertex and fragment shaders; height/slope-based vegetation, rocks and snow, per-pixel Lambert lighting
+- Single indexed vertex buffer, element index buffer, and vertex array object; hardware depth buffer replaces the CPU painter-sort
+- GPU mesh rebuilt only when the terrain is regenerated; orbit, zoom and lighting changes update matrices/uniforms
+- Drag mouse to orbit; scroll wheel to zoom; existing terrain controls, wireframe, PNG/BMP snapshot and OBJ export retained
+- GPU rendering requires an OpenGL 3.3 capable driver. OpenGL context creation may fail on Remote Desktop or old GPUs.
 
-## Differences from the VB6 original
-The original terrain routines recursively subdivided individual triangle edges. This version uses a shared-vertex height grid with diamond-square subdivision, avoiding cracks in adjacent triangles. The original custom viewing transformations/hidden-surface-removal routines are replaced with a compact orthographic camera and painter-sorted polygons. Therefore results are **not pixel-identical** or numerically identical to the VB6 application. It is a functional modernization rather than a literal port.
+## Known differences / limitations
+- This feature branch is a modernized implementation of the original VB6 concept, **not** an exact numerical or visual port.
+- The wireframe and basic terrain colouring are implemented; `Show axes` is retained in the UI but is not yet drawn in OpenGL.
+- Water level currently affects the fragment colour threshold, rather than generating a separate flat water surface.
+- Smooth camera changes require mouse events; no perpetual render loop runs while idle.
+- Requires Windows for build/runtime. The code was authored without local Windows SDK verification; inspect GitHub Actions for compilation results.
 
-The application uses only standard .NET Windows Forms and System.Drawing, with no external NuGet dependencies.
+## Build
+```powershell
+dotnet build MountainGen.WinForms.csproj --configuration Release
+```
